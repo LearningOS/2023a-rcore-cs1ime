@@ -1,4 +1,5 @@
 //! Types related to task management
+use crate::config::MAX_SYSCALL_NUM;
 
 use super::TaskContext;
 
@@ -7,6 +8,8 @@ use super::TaskContext;
 pub struct TaskControlBlock {
     /// The task status in it's lifecycle
     pub task_status: TaskStatus,
+    pub sys_times: [u32; MAX_SYSCALL_NUM],
+    pub start_time: usize,
     /// The task context
     pub task_cx: TaskContext,
 }

@@ -15,10 +15,12 @@ mod switch;
 mod task;
 
 use crate::config::MAX_APP_NUM;
+use crate::config::MAX_SYSCALL_NUM;
 use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
 use lazy_static::*;
 use switch::__switch;
+use crate::timer::get_time_ms;
 pub use task::{TaskControlBlock, TaskStatus};
 
 pub use context::TaskContext;
@@ -51,9 +53,12 @@ lazy_static! {
     /// Global variable: TASK_MANAGER
     pub static ref TASK_MANAGER: TaskManager = {
         let num_app = get_num_app();
+        let start_time = get_time_ms();
         let mut tasks = [TaskControlBlock {
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
+            sys_times: [0; MAX_SYSCALL_NUM],
+            start_time
         }; MAX_APP_NUM];
         for (i, task) in tasks.iter_mut().enumerate() {
             task.task_cx = TaskContext::goto_restore(init_app_cx(i));
@@ -103,6 +108,46 @@ impl TaskManager {
         let current = inner.current_task;
         inner.tasks[current].task_status = TaskStatus::Exited;
     }
+    fn get_current_status(&self) -> TaskStatus
+    {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].task_status.clone()
+    }
+    fn inc_current_systimes(&self,num : usize)
+    {
+        if num >= MAX_SYSCALL_NUM 
+        {
+            return;
+        }
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        // if num == 64
+        // {
+        //     println!("[+] current = {} num = {} systime = {}",current,num,inner.tasks[current].sys_times[num].clone());
+        // }
+        
+        inner.tasks[current].sys_times[num]+=1;
+    }
+    fn get_current_systimes(&self) -> [u32; MAX_SYSCALL_NUM]
+    {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        
+        // if num == 169
+        // {
+        //     println!("[+] current = {} systime = {}",current,inner.tasks[current].sys_times.clone()[169]);
+        // }
+        inner.tasks[current].sys_times.clone()
+        
+    }
+    fn get_current_running_times(&self) -> usize
+    {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        get_time_ms() - inner.tasks[current].start_time
+    }
+
 
     /// Find next task to run and return task id.
     ///
@@ -168,4 +213,24 @@ pub fn suspend_current_and_run_next() {
 pub fn exit_current_and_run_next() {
     mark_current_exited();
     run_next_task();
+}
+
+pub fn get_current_status () -> TaskStatus
+{
+    TASK_MANAGER.get_current_status()
+}
+
+pub fn get_current_systimes() -> [u32; MAX_SYSCALL_NUM]
+{
+    TASK_MANAGER.get_current_systimes()
+}
+
+pub fn inc_current_systimes(num: usize)
+{
+    TASK_MANAGER.inc_current_systimes(num);
+}
+
+pub fn get_current_running_times() -> usize
+{
+    TASK_MANAGER.get_current_running_times()
 }
