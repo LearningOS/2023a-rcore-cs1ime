@@ -14,6 +14,9 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
+use core::usize;
+use crate::timer::get_time_us;
+use crate::config::MAX_SYSCALL_NUM;
 use crate::loader::{get_app_data, get_num_app};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
@@ -102,6 +105,35 @@ impl TaskManager {
         let cur = inner.current_task;
         inner.tasks[cur].task_status = TaskStatus::Exited;
     }
+    
+    fn get_current_status(&self)->TaskStatus
+    {
+        let inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        inner.tasks[cur].task_status
+    }
+    
+    fn inc_syscall_times(&self,num: usize)
+    {
+        let mut inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        inner.tasks[cur].syscall_times[num]+=1;
+    }
+    
+    fn get_syscall_times(&self)->[u32;MAX_SYSCALL_NUM]
+    {
+        let inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        inner.tasks[cur].syscall_times
+    }
+    
+    fn get_running_time(&self)->usize
+    {
+        let inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        (get_time_us()/1_000)-inner.tasks[cur].start_time
+    }
+    
 
     /// Find next task to run and return task id.
     ///
@@ -124,6 +156,20 @@ impl TaskManager {
     fn get_current_trap_cx(&self) -> &'static mut TrapContext {
         let inner = self.inner.exclusive_access();
         inner.tasks[inner.current_task].get_trap_cx()
+    }
+
+    fn do_mmap(&self,_start: usize, _len: usize, _port: usize)->isize
+    {
+        let mut inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        inner.tasks[cur].do_mmap(_start, _len, _port)
+    }
+
+    fn do_munmap(&self,_start: usize, _len: usize)->isize
+    {
+        let mut inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        inner.tasks[cur].do_munmap(_start, _len)
     }
 
     /// Change the current 'Running' task's program break
@@ -198,7 +244,38 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
     TASK_MANAGER.get_current_trap_cx()
 }
 
+pub fn current_do_mmap(_start: usize, _len: usize, _port: usize)->isize
+{
+    TASK_MANAGER.do_mmap(_start, _len, _port)
+}
+
+pub fn current_do_munmap(_start: usize, _len: usize)->isize
+{
+    TASK_MANAGER.do_munmap(_start, _len)
+}
+
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
 }
+
+pub fn get_current_status()->TaskStatus
+{
+    TASK_MANAGER.get_current_status()
+}
+
+pub fn inc_current_syscall_times(num: usize)
+{
+    TASK_MANAGER.inc_syscall_times(num);
+}
+
+pub fn get_current_syscall_times()->[u32;MAX_SYSCALL_NUM]
+{
+    TASK_MANAGER.get_syscall_times()
+}
+
+pub fn get_current_running_time()->usize
+{
+    TASK_MANAGER.get_running_time()
+}
+

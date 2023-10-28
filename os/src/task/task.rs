@@ -1,9 +1,10 @@
 //! Types related to task management
 use super::TaskContext;
-use crate::config::TRAP_CONTEXT_BASE;
+use crate::config::{TRAP_CONTEXT_BASE, MAX_SYSCALL_NUM, PAGE_SIZE};
 use crate::mm::{
     kernel_stack_position, MapPermission, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE,
 };
+use crate::timer::get_time_us;
 use crate::trap::{trap_handler, TrapContext};
 
 /// The task control block (TCB) of a task.
@@ -28,9 +29,53 @@ pub struct TaskControlBlock {
 
     /// Program break
     pub program_brk: usize,
+    pub syscall_times: [u32; MAX_SYSCALL_NUM],
+    pub start_time: usize,
 }
 
 impl TaskControlBlock {
+    pub fn do_mmap(&mut self,_start: usize, _len: usize, _port: usize) -> isize
+    {
+        if _start & (PAGE_SIZE-1) != 0
+        {
+            return -1;
+        }
+        if _port == 0 || (_port & !(7 as usize) != 0)
+        {
+            return -1;
+        }
+        if self.memory_set.is_conflit_range(VirtAddr(_start), VirtAddr(_start+_len))
+        {
+            return -1;
+        }
+        
+
+        if (_port & 1) == 0
+        {
+            return 0;
+        }
+        let mut perm  = MapPermission::R;
+        if (_port & 2) != 0
+        {
+            perm |= MapPermission::W;
+        }
+        if (_port & 4) != 0
+        {
+            perm |= MapPermission::X;
+        }
+
+        perm |= MapPermission::U;
+
+        self.memory_set.insert_framed_area(VirtAddr(_start), VirtAddr(_start+_len), perm);
+        
+        0
+    }
+
+    pub fn do_munmap(&mut self,_start: usize, _len: usize)->isize
+    {
+        self.memory_set.unmap_area(VirtAddr(_start), VirtAddr(_start+_len))
+    }
+
     /// get the trap context
     pub fn get_trap_cx(&self) -> &'static mut TrapContext {
         self.trap_cx_ppn.get_mut()
@@ -55,11 +100,14 @@ impl TaskControlBlock {
             kernel_stack_top.into(),
             MapPermission::R | MapPermission::W,
         );
+        let start_time = get_time_us()/1_000;
         let task_control_block = Self {
             task_status,
             task_cx: TaskContext::goto_trap_return(kernel_stack_top),
             memory_set,
             trap_cx_ppn,
+            start_time,
+            syscall_times: [0;MAX_SYSCALL_NUM],
             base_size: user_sp,
             heap_bottom: user_sp,
             program_brk: user_sp,
