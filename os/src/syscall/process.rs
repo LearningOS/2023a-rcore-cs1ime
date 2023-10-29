@@ -1,14 +1,16 @@
 //! Process management syscalls
+use core::mem::transmute;
+
 use alloc::sync::Arc;
 
 use crate::{
     config::MAX_SYSCALL_NUM,
     loader::get_app_data_by_name,
-    mm::{translated_refmut, translated_str},
+    mm::{translated_refmut, translated_str, translated_byte_buffer},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
         suspend_current_and_run_next, TaskStatus,
-    },
+    }, timer::{get_time_us, get_time_ms},
 };
 
 #[repr(C)]
@@ -118,11 +120,27 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    let usec = get_time_us();
+    let sec = get_time_us()/1_000_000;
+
+    let tv = TimeVal {
+        sec,usec
+    };
+    let byte_tv: &[u8]=unsafe{
+        let slice = core::slice::from_raw_parts(&tv as *const _ as *const u8,
+            core::mem::size_of::<TimeVal>());
+        transmute(slice)
+    };
+    let buffers = translated_byte_buffer(current_user_token(), _ts as *mut u8, 
+        core::mem::size_of::<TimeVal>());
+    let mut idx = 0;
+    for bs in buffers
+    {
+        bs.copy_from_slice(&byte_tv[idx..(idx+bs.len())]);
+        idx+=bs.len();
+    }
+
+    0
 }
 
 /// YOUR JOB: Finish sys_task_info to pass testcases
@@ -133,7 +151,33 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
         "kernel:pid[{}] sys_task_info NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let task = current_task().unwrap();
+    let current = 
+        task.inner_exclusive_access();
+    let status = current.task_status;
+    let time = get_time_ms() - current.start_time;
+    let syscall_times = current.sys_times;
+
+    let ti: TaskInfo = TaskInfo {
+        status,time,syscall_times
+    };
+
+    let byte_ti: &[u8]=unsafe{
+        let slice = core::slice::from_raw_parts(&ti as *const _ as *const u8,
+            core::mem::size_of::<TaskInfo>());
+        transmute(slice)
+    };
+
+    let buffers = translated_byte_buffer(current_user_token(), _ti as *mut u8, 
+        core::mem::size_of::<TaskInfo>());
+    let mut idx = 0;
+
+    for bs in buffers
+    {
+        bs.copy_from_slice(&byte_ti[idx..(idx+bs.len())]);
+        idx+=bs.len();
+    }
+    0
 }
 
 /// YOUR JOB: Implement mmap.
