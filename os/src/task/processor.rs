@@ -52,10 +52,20 @@ lazy_static! {
 
 ///The main part of process execution and scheduling
 ///Loop `fetch_task` to get the process that needs to run, and switch the process through `__switch`
+// idle process
+
+pub const GLOBAL_BIG_STRIDE : isize = 100000000;
+
 pub fn run_tasks() {
     loop {
         let mut processor = PROCESSOR.exclusive_access();
         if let Some(task) = fetch_task() {
+            // println!("schedule = {}",task.as_ref() as *const _ as usize);
+            {
+                let mut inner = task.inner_exclusive_access();
+                inner.stride += GLOBAL_BIG_STRIDE / inner.priority;
+            }
+            
             let idle_task_cx_ptr = processor.get_idle_task_cx_ptr();
             // access coming task TCB exclusively
             let mut task_inner = task.inner_exclusive_access();

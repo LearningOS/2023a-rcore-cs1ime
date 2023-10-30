@@ -60,6 +60,59 @@ impl MemorySet {
             None,
         );
     }
+    pub fn unmap_area(&mut self,
+        start_va: VirtAddr,
+        end_va: VirtAddr
+    )->isize
+    {
+        // if self.is_conflit_range(start_va, end_va)
+        // {
+        //     return -1;
+        // }
+        let target_start = start_va.floor().0;
+        let target_end = end_va.ceil().0;
+        for area in self.areas.iter_mut()
+        {
+            let start = area.vpn_range.get_start().0;
+            let end = area.vpn_range.get_end().0;
+            println!("un start = {} end = {}",start,end);   
+            if start == target_start &&
+                end == target_end
+            {
+                area.unmap(&mut self.page_table);
+                return 0;
+            }
+        }
+        -1
+    }
+    
+    pub fn is_conflit_range(&self,
+        start_va: VirtAddr,
+        end_va: VirtAddr
+    ) -> bool
+    {
+        let target_start = start_va.floor().0;
+        let target_end = end_va.ceil().0;
+
+        println!("target_start = {} target_end = {}",target_start,target_end);
+        
+        for n in target_start..target_end
+        {
+            
+            let vn = VirtPageNum(n);
+            if let Some(ppn) = self.translate(vn)
+            {
+                println!("n = {} ppn = {}",n,ppn.ppn().0);
+                if ppn.ppn().0!=0
+                {
+                    return true;
+                }
+            }
+            
+        }
+        false
+    }
+    
     /// remove a area
     pub fn remove_area_with_start_vpn(&mut self, start_vpn: VirtPageNum) {
         if let Some((idx, area)) = self

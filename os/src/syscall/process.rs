@@ -4,9 +4,9 @@ use core::mem::transmute;
 use alloc::sync::Arc;
 
 use crate::{
-    config::MAX_SYSCALL_NUM,
+    config::{MAX_SYSCALL_NUM, PAGE_SIZE},
     loader::get_app_data_by_name,
-    mm::{translated_refmut, translated_str, translated_byte_buffer},
+    mm::{translated_refmut, translated_str, translated_byte_buffer, VirtAddr, MapPermission},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
         suspend_current_and_run_next, TaskStatus,
@@ -120,7 +120,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
-    let usec = get_time_us();
+    let usec = get_time_us()%1_000_000;
     let sec = get_time_us()/1_000_000;
 
     let tv = TimeVal {
@@ -182,20 +182,59 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
 
 /// YOUR JOB: Implement mmap.
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    let task = current_task().unwrap();
+    let mut current = 
+        task.inner_exclusive_access();
+    let memory_set = &mut current.memory_set;
+
+    if _start & (PAGE_SIZE-1) != 0
+    {
+        return -1;
+    }
+    if _port == 0 || (_port & !(7 as usize) != 0)
+    {
+        return -1;
+    }
+    if memory_set.is_conflit_range(VirtAddr(_start), VirtAddr(_start+_len))
+    {
+        return -1;
+    }
+
+    if (_port & 1) == 0
+    {
+        return 0;
+    }
+    let mut perm  = MapPermission::R;
+    if (_port & 2) != 0
+    {
+        perm |= MapPermission::W;
+    }
+    if (_port & 4) != 0
+    {
+        perm |= MapPermission::X;
+    }
+
+    perm |= MapPermission::U;
+
+    memory_set.insert_framed_area(VirtAddr(_start), VirtAddr(_start+_len), perm);
+    
+    
+    0
 }
 
 /// YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    if _start & (PAGE_SIZE-1) != 0
+    {
+        return -1;
+    }
+
+    let task = current_task().unwrap();
+    let mut current = 
+        task.inner_exclusive_access();
+    let memory_set = &mut current.memory_set;
+
+    memory_set.unmap_area(VirtAddr(_start), VirtAddr(_start+_len))
 }
 
 /// change data segment size
@@ -211,18 +250,38 @@ pub fn sys_sbrk(size: i32) -> isize {
 /// YOUR JOB: Implement spawn.
 /// HINT: fork + exec =/= spawn
 pub fn sys_spawn(_path: *const u8) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    // Fork the current task
+    trace!("kernel:pid[{}] sys_fork", current_task().unwrap().pid.0);
+    let current = current_task().unwrap();
+    let new_task = current.fork();
+    let new_pid = new_task.pid.0;
+    
+    let trap_cx = new_task.inner_exclusive_access().get_trap_cx();
+    trap_cx.x[10] = 0;
+   
+    {
+        let token = current_user_token();
+        let path = translated_str(token, _path);
+        if let Some(data) = get_app_data_by_name(path.as_str()) {
+            new_task.exec(data);
+        }
+    }
+
+    add_task(new_task);
+
+    new_pid as isize
 }
 
 // YOUR JOB: Set task priority.
 pub fn sys_set_priority(_prio: isize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    if _prio <= 1
+    {
+        return -1;
+    }
+    let task = current_task().unwrap();
+    let mut current = 
+        task.inner_exclusive_access();
+    current.priority=_prio;
+    
+    _prio
 }
