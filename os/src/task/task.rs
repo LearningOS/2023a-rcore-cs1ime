@@ -1,10 +1,11 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-use crate::config::TRAP_CONTEXT_BASE;
+use crate::config::{TRAP_CONTEXT_BASE, MAX_SYSCALL_NUM};
 use crate::fs::{File, Stdin, Stdout};
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
+use crate::timer::get_time_ms;
 use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
@@ -71,6 +72,15 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    pub start_time: usize,
+
+    pub sys_times: [u32; MAX_SYSCALL_NUM],
+
+    pub priority: isize,
+
+    pub stride: isize,
+
 }
 
 impl TaskControlBlockInner {
@@ -111,6 +121,8 @@ impl TaskControlBlock {
         let pid_handle = pid_alloc();
         let kernel_stack = kstack_alloc();
         let kernel_stack_top = kernel_stack.get_top();
+
+        let start_time = get_time_ms();
         // push a task context which goes to trap_return to the top of kernel stack
         let task_control_block = Self {
             pid: pid_handle,
@@ -135,6 +147,10 @@ impl TaskControlBlock {
                     ],
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    start_time,
+                    sys_times: [0;MAX_SYSCALL_NUM],
+                    priority: 16,
+                    stride: 0,
                 })
             },
         };
@@ -200,6 +216,8 @@ impl TaskControlBlock {
                 new_fd_table.push(None);
             }
         }
+
+        let start_time = get_time_ms();
         let task_control_block = Arc::new(TaskControlBlock {
             pid: pid_handle,
             kernel_stack,
@@ -216,6 +234,10 @@ impl TaskControlBlock {
                     fd_table: new_fd_table,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    start_time,
+                    priority: 16,
+                    sys_times: [0;MAX_SYSCALL_NUM],
+                    stride: 0,
                 })
             },
         });
@@ -243,8 +265,11 @@ impl TaskControlBlock {
         let old_break = inner.program_brk;
         let new_brk = inner.program_brk as isize + size as isize;
         if new_brk < heap_bottom as isize {
+            println!(" change_program_brk None");
             return None;
         }
+        println!(" change_program_brk 123");
+        println!("heap_bottom = {} size = {}",heap_bottom,size);
         let result = if size < 0 {
             inner
                 .memory_set

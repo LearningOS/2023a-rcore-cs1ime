@@ -289,13 +289,66 @@ impl MemorySet {
         self.areas.clear();
     }
 
+    pub fn unmap_area(&mut self,
+        start_va: VirtAddr,
+        end_va: VirtAddr
+    )->isize
+    {
+        // if self.is_conflit_range(start_va, end_va)
+        // {
+        //     return -1;
+        // }
+        let target_start = start_va.floor().0;
+        let target_end = end_va.ceil().0;
+        for area in self.areas.iter_mut()
+        {
+            let start = area.vpn_range.get_start().0;
+            let end = area.vpn_range.get_end().0;
+            // println!("un start = {} end = {}",start,end);   
+            if start == target_start &&
+                end == target_end
+            {
+                area.unmap(&mut self.page_table);
+                return 0;
+            }
+        }
+        -1
+    }
+
+    pub fn is_conflit_range(&self,
+        start_va: VirtAddr,
+        end_va: VirtAddr
+    ) -> bool
+    {
+        let target_start = start_va.floor().0;
+        let target_end = end_va.ceil().0;
+
+        // println!("target_start = {} target_end = {}",target_start,target_end);
+        
+        for n in target_start..target_end
+        {
+            
+            let vn = VirtPageNum(n);
+            if let Some(ppn) = self.translate(vn)
+            {
+                // println!("n = {} ppn = {}",n,ppn.ppn().0);
+                if ppn.ppn().0!=0
+                {
+                    return true;
+                }
+            }
+            
+        }
+        false
+    }
+
     /// shrink the area to new_end
     #[allow(unused)]
     pub fn shrink_to(&mut self, start: VirtAddr, new_end: VirtAddr) -> bool {
         if let Some(area) = self
             .areas
             .iter_mut()
-            .find(|area| area.vpn_range.get_start() == start.floor())
+            .find(|area| area.vpn_range.get_start().0 == start.floor().0-1)
         {
             area.shrink_to(&mut self.page_table, new_end.ceil());
             true
@@ -310,7 +363,10 @@ impl MemorySet {
         if let Some(area) = self
             .areas
             .iter_mut()
-            .find(|area| area.vpn_range.get_start() == start.floor())
+            .find(|area| {
+                println!("area.vpn_range.get_start() = {}",area.vpn_range.get_start().0);
+                area.vpn_range.get_start().0 == start.floor().0-1
+            })
         {
             area.append_to(&mut self.page_table, new_end.ceil());
             true

@@ -18,7 +18,7 @@
 //! We then call [`task::run_tasks()`] and for the first time go to
 //! userspace.
 
-#![deny(missing_docs)]
+// #![deny(missing_docs)]
 #![deny(warnings)]
 #![no_std]
 #![no_main]
@@ -46,7 +46,7 @@ pub mod syscall;
 pub mod task;
 pub mod timer;
 pub mod trap;
-
+// println!()
 use core::arch::global_asm;
 
 global_asm!(include_str!("entry.asm"));
