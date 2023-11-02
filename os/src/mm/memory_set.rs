@@ -348,7 +348,7 @@ impl MemorySet {
         if let Some(area) = self
             .areas
             .iter_mut()
-            .find(|area| area.vpn_range.get_start().0 == start.floor().0-1)
+            .find(|area| area.vpn_range.get_start().0 == start.floor().0)
         {
             area.shrink_to(&mut self.page_table, new_end.ceil());
             true
@@ -365,7 +365,7 @@ impl MemorySet {
             .iter_mut()
             .find(|area| {
                 println!("area.vpn_range.get_start() = {}",area.vpn_range.get_start().0);
-                area.vpn_range.get_start().0 == start.floor().0-1
+                area.vpn_range.get_start().0 == start.floor().0
             })
         {
             area.append_to(&mut self.page_table, new_end.ceil());
